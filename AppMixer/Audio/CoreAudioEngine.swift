@@ -150,7 +150,8 @@ final class CoreAudioEngine: AudioEngine {
     private func syncTaps() {
         // apps에는 readApps가 이미 저장된 설정을 채워 두었다
         var wanted: [pid_t: Float] = [:]
-        for app in apps where app.volume < 1 || app.isMuted { wanted[app.id] = app.isMuted ? 0 : app.volume }
+        // 슬라이더 값의 제곱을 gain으로: 귀는 소리 크기를 로그로 느껴서 직선이면 50%에서도 거의 안 줄어든 것처럼 들린다
+        for app in apps where app.volume < 1 || app.isMuted { wanted[app.id] = app.isMuted ? 0 : app.volume * app.volume }
 
         // 더 필요 없거나, 앱의 프로세스 구성이 바뀐(새 헬퍼가 생긴) 탭은 없앤다
         for (owner, tap) in taps where wanted[owner] == nil || tap.processes != Set(processesByOwner[owner] ?? []) {
