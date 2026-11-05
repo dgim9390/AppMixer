@@ -66,3 +66,7 @@ xcodebuild -project AppMixer.xcodeproj -scheme AppMixer -derivedDataPath build t
 ```
 
 `.xcodeproj`, `Info.plist`, `.entitlements`는 `project.yml`에서 생성되므로 직접 수정하지 마세요.
+
+## 라이선스
+
+[MIT](LICENSE)
