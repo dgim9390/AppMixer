@@ -1,7 +1,11 @@
 # AppMixer — macOS 메뉴바 앱별 볼륨 믹서 (설계 문서)
 
-> 상태: **3단계까지 완료**. Mock 엔진으로 UI가 동작하고, `CoreAudioEngine`은 빈 껍데기입니다. 다음은 4단계(마스터 볼륨 실제 연동)입니다.
-> 엔진 교체는 `AppMixer/AppMixerApp.swift`의 `MockAudioEngine()` ↔ `CoreAudioEngine()` 한 줄입니다.
+> 상태: **5단계까지 완료**. 앱은 `CoreAudioEngine`으로 실행되며 마스터 볼륨·음소거가 실제 시스템과 동기화되고, 소리를 내는 앱이 목록에 나타납니다. 앱별 슬라이더는 값만 기억하고 아직 소리를 바꾸지 않습니다(6단계).
+> UI만 확인하려면 `AppMixer/AppMixerApp.swift`에서 `CoreAudioEngine()`을 `MockAudioEngine()`으로 바꾸세요(한 줄).
+>
+> 4단계 메모: 마스터 볼륨은 `kAudioHardwareServiceDeviceProperty_VirtualMainVolume`을 `AudioObjectGet/SetPropertyData`로 읽고 씁니다. 같은 속성을 다루는 `AudioHardwareService…` 함수는 deprecated라 쓰지 않았습니다. 오디오 녹음 권한은 필요 없었습니다.
+>
+> 5단계 메모: 소리는 대부분 헬퍼 프로세스(Chrome Helper, Safari의 WebKit GPU 프로세스)가 냅니다. 그래서 비공개 함수 `responsibility_get_pid_responsible_for_pid`로 그 헬퍼를 띄운 앱을 찾아 하나로 묶습니다. 이 함수는 App Store 심사에서 거절될 수 있으므로, App Store로 배포하려면 다른 방법으로 바꿔야 합니다. 이 단계도 녹음 권한이 필요 없었습니다.
 
 메뉴바 아이콘을 클릭하면 패널이 열리고, 맨 위에 시스템 마스터 볼륨이, 그 아래에 지금 소리를 내는 앱 목록(아이콘 · 이름 · 볼륨 슬라이더 · 음소거 버튼)이 나옵니다. 윈도우의 볼륨 믹서와 같은 앱입니다.
 

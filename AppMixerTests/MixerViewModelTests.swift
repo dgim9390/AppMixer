@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import AppMixer
 
@@ -17,9 +18,9 @@ struct MixerViewModelTests {
         #expect(vm.apps[0].volume == 0.3)
     }
 
-    @Test func realEngineShellPlugsIn() {
+    @Test func realEnginePlugsInAndHidesItself() {
         let vm = MixerViewModel(engine: CoreAudioEngine())
-        #expect(vm.apps.isEmpty)
+        #expect(vm.apps.allSatisfy { $0.id != getpid() })
     }
 
     @Test func masterVolumeAndMute() {
