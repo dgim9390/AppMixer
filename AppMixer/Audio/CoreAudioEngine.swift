@@ -1,9 +1,12 @@
 import AppKit
 import CoreAudio
 import AudioToolbox
+import os
+
+private let log = Logger(subsystem: "com.dgim9390.AppMixer", category: "engine")
 
 /// 실제 엔진 (Process Tap 방식).
-/// 4단계: 마스터 볼륨 연동. 5단계: 소리 내는 앱 감지. 6단계(앱별 볼륨 적용)는 아직 없음.
+/// 4단계: 마스터 볼륨 연동. 5단계: 소리 내는 앱 감지. 6단계: 앱별 볼륨(Process Tap + gain).
 /// Core Audio C API는 Swift에서 바로 호출하므로 브릿징 헤더는 없다 (README §6).
 @MainActor
 final class CoreAudioEngine: AudioEngine {
@@ -19,6 +22,9 @@ final class CoreAudioEngine: AudioEngine {
     private var watchedProcesses: Set<AudioObjectID> = []
     /// 사용자가 정한 앱별 값. 앱이 소리를 멈췄다 다시 내도 유지된다.
     private var appSettings: [pid_t: (volume: Float, muted: Bool)] = [:]
+    /// 앱(소유 PID)별 Core Audio 프로세스 객체. Chrome처럼 헬퍼가 여러 개면 여러 개.
+    private var processesByOwner: [pid_t: [AudioObjectID]] = [:]
+    private var taps: [pid_t: AppTap] = [:]
 
     init() {
         // 이어폰 연결 등으로 기본 출력 장치가 바뀌면 새 장치에 다시 붙는다
@@ -62,6 +68,10 @@ final class CoreAudioEngine: AudioEngine {
         device = Self.get(system, kAudioHardwarePropertyDefaultOutputDevice, as: AudioObjectID.self) ?? AudioObjectID(kAudioObjectUnknown)
         for selector in Self.masterSelectors { listen(selector, on: device, add: true) }
         readMaster()
+
+        // 탭은 출력 장치에 묶여 있으므로 장치가 바뀌면 전부 새로 만든다
+        taps.removeAll()
+        syncTaps()
     }
 
     /// 볼륨 조절이 없는 장치(HDMI 등)는 읽기가 실패하므로 값을 그대로 둔다.
@@ -89,18 +99,23 @@ final class CoreAudioEngine: AudioEngine {
     private func readApps() {
         let processes = Self.processObjects()
         var byOwner: [pid_t: AudioApp] = [:]
+        var owners: [pid_t: [AudioObjectID]] = [:]
 
         for process in processes {
             if watchedProcesses.insert(process).inserted, let block = processListener {
                 var addr = Self.address(kAudioProcessPropertyIsRunningOutput)
                 AudioObjectAddPropertyListenerBlock(process, &addr, .main, block)
             }
-            guard Self.get(process, kAudioProcessPropertyIsRunningOutput, as: UInt32.self) == 1,
-                  let pid = Self.get(process, kAudioProcessPropertyPID, as: pid_t.self) else { continue }
+            guard let pid = Self.get(process, kAudioProcessPropertyPID, as: pid_t.self) else { continue }
 
             // 소리는 보통 헬퍼 프로세스(Safari → WebKit GPU, Chrome Helper)가 내므로 그 프로세스를 띄운 앱 기준으로 묶는다
             let owner = responsiblePID(for: pid)
-            guard owner != getpid(), byOwner[owner] == nil else { continue }
+            guard owner != getpid() else { continue }
+            owners[owner, default: []].append(process)
+
+            // 탭이 걸린 앱은 잠깐 출력이 멈춰도 목록에 남긴다 (사라졌다 나타났다 반복 방지)
+            let running = Self.get(process, kAudioProcessPropertyIsRunningOutput, as: UInt32.self) == 1
+            guard running || taps[owner] != nil, byOwner[owner] == nil else { continue }
             let app = NSRunningApplication(processIdentifier: owner)
             let setting = appSettings[owner] ?? (1, false)
             byOwner[owner] = AudioApp(
@@ -113,7 +128,9 @@ final class CoreAudioEngine: AudioEngine {
         }
 
         watchedProcesses.formIntersection(processes) // 사라진 프로세스 객체의 리스너는 객체와 함께 없어진다
+        processesByOwner = owners
         apps = byOwner.values.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+        syncTaps()
         onChange?()
     }
 
@@ -127,10 +144,31 @@ final class CoreAudioEngine: AudioEngine {
         return Array(ids.prefix(Int(size) / MemoryLayout<AudioObjectID>.size))
     }
 
-    // MARK: 앱별 볼륨 (6단계: 아직 소리는 바뀌지 않고 값만 기억)
+    // MARK: 앱별 볼륨 (6단계)
 
-    // 6단계: 앱별 CATapDescription(.mutedWhenTapped) → AudioHardwareCreateProcessTap
-    // → aggregate 장치 → IOProc에서 gain 곱하기. 볼륨 100%이고 음소거가 아니면 탭을 없앤다.
+    /// 볼륨 100%이고 음소거가 아닌 앱은 탭 없이 원래 경로로 재생한다 (지연·위험 0).
+    private func syncTaps() {
+        let wanted = Set(apps.map(\.id).filter { appSettings[$0].map { $0.volume < 1 || $0.muted } ?? false })
+
+        // 더 필요 없거나, 앱의 프로세스 구성이 바뀐(새 헬퍼가 생긴) 탭은 없앤다
+        for (owner, tap) in taps where !wanted.contains(owner) || tap.processes != Set(processesByOwner[owner] ?? []) {
+            taps[owner] = nil
+            log.info("tap 제거: pid \(owner)")
+        }
+
+        for owner in wanted {
+            let setting = appSettings[owner] ?? (1, false)
+            let gain: Float = setting.muted ? 0 : setting.volume
+            if let tap = taps[owner] {
+                tap.gain.pointee = gain
+            } else if let processes = processesByOwner[owner], !processes.isEmpty,
+                      let uid = Self.get(device, kAudioDevicePropertyDeviceUID, as: Unmanaged<CFString>.self)?.takeRetainedValue() {
+                taps[owner] = AppTap(processes: processes, outputUID: uid as String, gain: gain)
+                log.info("tap 생성 \(self.taps[owner] == nil ? "실패" : "성공"): pid \(owner)")
+            }
+        }
+    }
+
     func setVolume(_ volume: Float, for app: AudioApp.ID) {
         appSettings[app, default: (1, false)].volume = volume
         readApps()
@@ -164,6 +202,105 @@ final class CoreAudioEngine: AudioEngine {
         defer { value.deallocate() }
         guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, value) == noErr else { return nil }
         return value.move()
+    }
+}
+
+/// 한 앱의 Process Tap + aggregate 장치 + IO 콜백. 객체가 해제되면(deinit) 전부 정리되고 앱 소리는 원래대로 돌아온다.
+private final class AppTap {
+    let processes: Set<AudioObjectID>
+    // shortcut: 메인 스레드 쓰기 / 오디오 스레드 읽기를 정렬된 Float 하나로 공유 (arm64에서 찢어지지 않음).
+    // 최소 지원을 macOS 15로 올리면 Synchronization.Atomic으로 교체
+    let gain = UnsafeMutablePointer<Float>.allocate(capacity: 1)
+    private var tapID = AudioObjectID(kAudioObjectUnknown)
+    private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+    private var procID: AudioDeviceIOProcID?
+
+    init?(processes: [AudioObjectID], outputUID: String, gain initial: Float) {
+        self.processes = Set(processes)
+        gain.initialize(to: initial)
+
+        // 앱 소리를 가로채면서 원래 출력은 음소거
+        let desc = CATapDescription(stereoMixdownOfProcesses: processes)
+        desc.muteBehavior = .mutedWhenTapped
+        desc.isPrivate = true
+        var status = AudioHardwareCreateProcessTap(desc, &tapID)
+        guard status == noErr else { log.error("AudioHardwareCreateProcessTap 실패: \(status)"); return nil }
+
+        // 탭(입력) + 실제 스피커(출력)를 묶은 비공개 장치
+        let config: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "AppMixer Tap",
+            kAudioAggregateDeviceUIDKey: UUID().uuidString,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
+            kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: desc.uuid.uuidString]],
+        ]
+        status = AudioHardwareCreateAggregateDevice(config as CFDictionary, &aggregateID)
+        guard status == noErr else { log.error("AudioHardwareCreateAggregateDevice 실패: \(status)"); return nil }
+
+        // 큐 nil = HAL의 실시간 오디오 스레드에서 바로 호출
+        status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, nil, Self.ioBlock(gain: gain))
+        guard status == noErr else { log.error("AudioDeviceCreateIOProcIDWithBlock 실패: \(status)"); return nil }
+        status = AudioDeviceStart(aggregateID, procID)
+        guard status == noErr else { log.error("AudioDeviceStart 실패: \(status)"); return nil }
+    }
+
+    deinit {
+        if let procID {
+            AudioDeviceStop(aggregateID, procID)
+            AudioDeviceDestroyIOProcID(aggregateID, procID)
+        }
+        if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
+        if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
+        gain.deallocate()
+    }
+
+    /// 실시간 스레드에서 돈다: 할당·락·로그 금지. 입력(탭) 샘플 × gain → 출력.
+    /// HAL IOProc 데이터는 항상 Float32. 채널 수가 다르면 입력 채널을 돌려 쓴다 (스테레오 → 모노는 왼쪽만).
+    private static func ioBlock(gain: UnsafeMutablePointer<Float>) -> AudioDeviceIOBlock {
+        { _, inputList, _, outputList, _ in
+            let g = gain.pointee
+            let inputs = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputList))
+            let outputs = UnsafeMutableAudioBufferListPointer(outputList)
+
+            var inChannels = 0
+            for b in inputs { inChannels += Int(b.mNumberChannels) }
+
+            var outChannel = 0
+            for out in outputs {
+                guard let dst = out.mData?.assumingMemoryBound(to: Float.self), out.mNumberChannels > 0 else { continue }
+                let dstStride = Int(out.mNumberChannels)
+                let dstFrames = Int(out.mDataByteSize) / (MemoryLayout<Float>.size * dstStride)
+
+                for c in 0..<dstStride {
+                    // 이 출력 채널에 대응하는 입력 버퍼와 그 안의 채널 위치 찾기
+                    var src: UnsafeMutablePointer<Float>?
+                    var srcStride = 1, srcOffset = 0, srcFrames = 0
+                    if inChannels > 0 {
+                        var want = (outChannel + c) % inChannels
+                        for b in inputs {
+                            let n = Int(b.mNumberChannels)
+                            if want < n {
+                                src = b.mData?.assumingMemoryBound(to: Float.self)
+                                srcStride = n
+                                srcOffset = want
+                                srcFrames = Int(b.mDataByteSize) / (MemoryLayout<Float>.size * n)
+                                break
+                            }
+                            want -= n
+                        }
+                    }
+                    let frames = src == nil ? 0 : min(dstFrames, srcFrames)
+                    if let src {
+                        for f in 0..<frames { dst[f * dstStride + c] = src[f * srcStride + srcOffset] * g }
+                    }
+                    for f in frames..<dstFrames { dst[f * dstStride + c] = 0 }
+                }
+                outChannel += dstStride
+            }
+        }
     }
 }
 
