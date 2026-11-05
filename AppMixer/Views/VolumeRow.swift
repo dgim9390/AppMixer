@@ -13,7 +13,7 @@ struct VolumeRow: View {
         HStack(spacing: 8) {
             icon.resizable().scaledToFit().frame(width: 20, height: 20)
             Text(title).lineLimit(1).frame(width: 110, alignment: .leading)
-            Slider(value: Binding(get: { volume }, set: { onVolumeChange($0) }), in: 0...1)
+            TickSlider(value: volume, onChange: onVolumeChange)
                 .disabled(isMuted)
                 .opacity(isMuted ? 0.4 : 1)
             Button(action: onToggleMute) {
@@ -24,6 +24,34 @@ struct VolumeRow: View {
             .help(isMuted ? "음소거 해제" : "음소거")
             .accessibilityLabel(isMuted ? "\(title) 음소거 해제" : "\(title) 음소거")
         }
+    }
+}
+
+/// 25%마다 눈금이 있는 슬라이더. SwiftUI Slider는 눈금을 넣으면 그 값에만 멈춰서 NSSlider를 쓴다.
+struct TickSlider: NSViewRepresentable {
+    let value: Float
+    let onChange: (Float) -> Void
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider(value: Double(value), minValue: 0, maxValue: 1,
+                              target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+        slider.numberOfTickMarks = 5
+        slider.refusesFirstResponder = true // 방향키는 패널의 행 선택이 받는다
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.onChange = onChange
+        slider.floatValue = value
+        slider.isEnabled = context.environment.isEnabled
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onChange: onChange) }
+
+    final class Coordinator: NSObject {
+        var onChange: (Float) -> Void
+        init(onChange: @escaping (Float) -> Void) { self.onChange = onChange }
+        @MainActor @objc func changed(_ slider: NSSlider) { onChange(slider.floatValue) }
     }
 }
 
