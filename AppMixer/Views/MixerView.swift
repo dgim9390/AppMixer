@@ -42,6 +42,6 @@ struct MixerView: View {
             }
         }
         .padding(12)
-        .frame(width: 320)
+        .frame(width: 360)
     }
 }
