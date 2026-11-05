@@ -29,7 +29,32 @@ macOS 14.2에 추가된 Core Audio의 **Process Tap** API를 사용합니다. �
 
 ## 설치
 
-현재는 소스에서 빌드해야 합니다. Xcode와 [XcodeGen](https://github.com/yonaskolb/XcodeGen)이 필요합니다.
+1. [Releases](https://github.com/dgim9390/AppMixer/releases/latest)에서 `AppMixer-x.y.z.zip`을 내려받아 압축을 풉니다.
+2. `AppMixer.app`을 `응용 프로그램` 폴더로 옮깁니다.
+3. 처음 한 번은 아래 방법으로 실행을 허용해야 합니다.
+
+### 처음 실행할 때
+
+AppMixer는 Apple 공증(notarization)을 받지 않은 앱입니다. 그래서 처음 열면 macOS가 "Apple은 'AppMixer'에 악성 코드가 없음을 확인할 수 없습니다"라는 경고와 함께 실행을 막습니다. 아래 방법 중 하나로 한 번만 허용하면, 그다음부터는 바로 실행됩니다.
+
+**시스템 설정에서 허용**
+
+1. `AppMixer.app`을 더블클릭하고, 경고 창에서 **완료**를 누릅니다.
+2. **시스템 설정 → 개인정보 보호 및 보안**으로 이동합니다.
+3. 아래쪽 보안 항목에 있는 "'AppMixer'이(가) 차단되었습니다" 옆의 **그래도 열기**를 누르고 암호를 입력합니다.
+4. 다시 나오는 확인 창에서 **열기**를 누릅니다.
+
+**터미널에서 허용**
+
+```bash
+xattr -dr com.apple.quarantine /Applications/AppMixer.app
+```
+
+이 명령은 내려받은 파일에 붙는 격리 표시를 지웁니다. 실행 후에는 그냥 더블클릭하면 열립니다.
+
+### 소스에서 빌드
+
+Xcode와 [XcodeGen](https://github.com/yonaskolb/XcodeGen)이 필요합니다.
 
 ```bash
 brew install xcodegen
@@ -66,6 +91,14 @@ xcodebuild -project AppMixer.xcodeproj -scheme AppMixer -derivedDataPath build t
 ```
 
 `.xcodeproj`, `Info.plist`, `.entitlements`는 `project.yml`에서 생성되므로 직접 수정하지 마세요.
+
+배포용 zip 만들기: `project.yml`에서 `CFBundleShortVersionString`을 올린 뒤 실행합니다.
+
+```bash
+xcodegen generate
+xcodebuild -project AppMixer.xcodeproj -scheme AppMixer -configuration Release -derivedDataPath build build
+ditto -c -k --keepParent build/Build/Products/Release/AppMixer.app dist/AppMixer-1.0.0.zip
+```
 
 ## 라이선스
 

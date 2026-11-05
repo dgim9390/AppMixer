@@ -2,3 +2,4 @@
 build/
 AppMixer/Info.plist
 AppMixer/AppMixer.entitlements
+dist/
