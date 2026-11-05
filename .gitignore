@@ -1,0 +1,4 @@
+*.xcodeproj/
+build/
+AppMixer/Info.plist
+AppMixer/AppMixer.entitlements
