@@ -20,8 +20,8 @@ final class CoreAudioEngine: AudioEngine {
     private var deviceListener: AudioObjectPropertyListenerBlock?
     private var processListener: AudioObjectPropertyListenerBlock?
     private var watchedProcesses: Set<AudioObjectID> = []
-    /// 사용자가 정한 앱별 값. 앱이 소리를 멈췄다 다시 내도 유지된다.
-    private var appSettings: [pid_t: (volume: Float, muted: Bool)] = [:]
+    /// 사용자가 정한 앱별 값. bundle ID로 저장해서 앱이나 AppMixer를 다시 켜도 유지된다.
+    private var appSettings: [String: AppSetting] = CoreAudioEngine.loadSettings()
     /// 앱(소유 PID)별 Core Audio 프로세스 객체. Chrome처럼 헬퍼가 여러 개면 여러 개.
     private var processesByOwner: [pid_t: [AudioObjectID]] = [:]
     private var taps: [pid_t: AppTap] = [:]
@@ -117,7 +117,7 @@ final class CoreAudioEngine: AudioEngine {
             let running = Self.get(process, kAudioProcessPropertyIsRunningOutput, as: UInt32.self) == 1
             guard running || taps[owner] != nil, byOwner[owner] == nil else { continue }
             let app = NSRunningApplication(processIdentifier: owner)
-            let setting = appSettings[owner] ?? (1, false)
+            let setting = appSettings[Self.settingKey(bundleID: app?.bundleIdentifier, pid: owner)] ?? AppSetting()
             byOwner[owner] = AudioApp(
                 id: owner,
                 name: app?.localizedName ?? "PID \(owner)",
@@ -148,17 +148,17 @@ final class CoreAudioEngine: AudioEngine {
 
     /// 볼륨 100%이고 음소거가 아닌 앱은 탭 없이 원래 경로로 재생한다 (지연·위험 0).
     private func syncTaps() {
-        let wanted = Set(apps.map(\.id).filter { appSettings[$0].map { $0.volume < 1 || $0.muted } ?? false })
+        // apps에는 readApps가 이미 저장된 설정을 채워 두었다
+        var wanted: [pid_t: Float] = [:]
+        for app in apps where app.volume < 1 || app.isMuted { wanted[app.id] = app.isMuted ? 0 : app.volume }
 
         // 더 필요 없거나, 앱의 프로세스 구성이 바뀐(새 헬퍼가 생긴) 탭은 없앤다
-        for (owner, tap) in taps where !wanted.contains(owner) || tap.processes != Set(processesByOwner[owner] ?? []) {
+        for (owner, tap) in taps where wanted[owner] == nil || tap.processes != Set(processesByOwner[owner] ?? []) {
             taps[owner] = nil
             log.info("tap 제거: pid \(owner)")
         }
 
-        for owner in wanted {
-            let setting = appSettings[owner] ?? (1, false)
-            let gain: Float = setting.muted ? 0 : setting.volume
+        for (owner, gain) in wanted {
             if let tap = taps[owner] {
                 tap.gain.pointee = gain
             } else if let processes = processesByOwner[owner], !processes.isEmpty,
@@ -170,13 +170,31 @@ final class CoreAudioEngine: AudioEngine {
     }
 
     func setVolume(_ volume: Float, for app: AudioApp.ID) {
-        appSettings[app, default: (1, false)].volume = volume
-        readApps()
+        updateSetting(for: app) { $0.volume = volume }
     }
 
     func setMuted(_ muted: Bool, for app: AudioApp.ID) {
-        appSettings[app, default: (1, false)].muted = muted
+        updateSetting(for: app) { $0.muted = muted }
+    }
+
+    // MARK: 설정 저장
+
+    private func updateSetting(for pid: pid_t, _ change: (inout AppSetting) -> Void) {
+        guard let app = apps.first(where: { $0.id == pid }) else { return }
+        change(&appSettings[Self.settingKey(bundleID: app.bundleID, pid: pid), default: AppSetting()])
+        // bundle ID가 없는 프로세스는 PID가 매번 바뀌므로 저장하지 않는다
+        let persistent = appSettings.filter { !$0.key.hasPrefix("pid:") && $0.value != AppSetting() }
+        UserDefaults.standard.set(try? JSONEncoder().encode(persistent), forKey: Self.settingsKey)
         readApps()
+    }
+
+    private static let settingsKey = "appSettings"
+
+    private static func settingKey(bundleID: String?, pid: pid_t) -> String { bundleID ?? "pid:\(pid)" }
+
+    private static func loadSettings() -> [String: AppSetting] {
+        guard let data = UserDefaults.standard.data(forKey: settingsKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: AppSetting].self, from: data)) ?? [:]
     }
 
     // MARK: Core Audio 헬퍼
@@ -203,6 +221,11 @@ final class CoreAudioEngine: AudioEngine {
         guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, value) == noErr else { return nil }
         return value.move()
     }
+}
+
+private struct AppSetting: Codable, Equatable {
+    var volume: Float = 1
+    var muted = false
 }
 
 /// 한 앱의 Process Tap + aggregate 장치 + IO 콜백. 객체가 해제되면(deinit) 전부 정리되고 앱 소리는 원래대로 돌아온다.
@@ -235,10 +258,26 @@ private final class AppTap {
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
             kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
-            kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: desc.uuid.uuidString]],
+            // 기본 품질 리샘플러는 고음이 깎여 먹먹하게 들린다 → 최고 품질
+            kAudioAggregateDeviceTapListKey: [[
+                kAudioSubTapUIDKey: desc.uuid.uuidString,
+                kAudioSubTapDriftCompensationKey: true,
+                kAudioSubTapDriftCompensationQualityKey: kAudioAggregateDriftCompensationMaxQuality,
+            ]],
         ]
         status = AudioHardwareCreateAggregateDevice(config as CFDictionary, &aggregateID)
         guard status == noErr else { log.error("AudioHardwareCreateAggregateDevice 실패: \(status)"); return nil }
+
+        // 탭과 출력의 샘플레이트가 다르면 리샘플링이 일어난다 (음질 문제 진단용)
+        var format = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        AudioObjectGetPropertyData(tapID, &addr, 0, nil, &size, &format)
+        var deviceRate = Float64(0)
+        size = UInt32(MemoryLayout<Float64>.size)
+        addr.mSelector = kAudioDevicePropertyNominalSampleRate
+        AudioObjectGetPropertyData(aggregateID, &addr, 0, nil, &size, &deviceRate)
+        log.notice("tap \(format.mSampleRate, privacy: .public)Hz \(format.mChannelsPerFrame, privacy: .public)ch → 출력 \(deviceRate, privacy: .public)Hz")
 
         // 큐 nil = HAL의 실시간 오디오 스레드에서 바로 호출
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, nil, Self.ioBlock(gain: gain))
