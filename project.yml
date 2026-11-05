@@ -27,6 +27,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dgim9390.AppMixer
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon # scripts/make-icon.swift로 생성
       configs:
         Release:
           ENABLE_HARDENED_RUNTIME: YES

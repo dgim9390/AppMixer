@@ -92,16 +92,14 @@ xcodebuild -project AppMixer.xcodeproj -scheme AppMixer -derivedDataPath build t
 
 `.xcodeproj`, `Info.plist`, `.entitlements`는 `project.yml`에서 생성되므로 직접 수정하지 마세요.
 
-배포용 DMG 만들기: `project.yml`에서 `CFBundleShortVersionString`을 올린 뒤 실행합니다. 파일 이름의 버전도 맞게 바꾸세요.
+배포용 DMG 만들기: `project.yml`에서 `CFBundleShortVersionString`을 올린 뒤 실행하면 `dist/AppMixer-<버전>.dmg`가 만들어집니다. [uv](https://github.com/astral-sh/uv)가 필요합니다(DMG 창 배치에 [dmgbuild](https://github.com/dmgbuild/dmgbuild)를 씁니다).
 
 ```bash
-xcodegen generate
-xcodebuild -project AppMixer.xcodeproj -scheme AppMixer -configuration Release -derivedDataPath build build
-rm -rf dist/dmg && mkdir -p dist/dmg
-cp -R build/Build/Products/Release/AppMixer.app dist/dmg/
-ln -s /Applications dist/dmg/Applications
-hdiutil create -volname AppMixer -srcfolder dist/dmg -ov -format UDZO dist/AppMixer-1.0.0.dmg
+./dmg/build.sh
 ```
+
+- DMG 창의 배경, 아이콘 위치: `dmg/make-background.swift`, `dmg/settings.py`
+- 앱 아이콘: `swift scripts/make-icon.swift`로 다시 생성합니다.
 
 ## 라이선스
 
