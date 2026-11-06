@@ -12,6 +12,7 @@ struct VolumeRow: View {
     var body: some View {
         HStack(spacing: 8) {
             icon.resizable().scaledToFit().frame(width: 20, height: 20)
+                .foregroundStyle(Color(white: 0.7)) // SF Symbol에만 적용되고 앱 아이콘 색은 그대로
             Text(title).lineLimit(1).frame(width: 110, alignment: .leading)
             TickSlider(value: volume, onChange: onVolumeChange)
                 .disabled(isMuted)

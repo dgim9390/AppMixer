@@ -2,7 +2,7 @@
 
 macOS 메뉴바에서 앱별로 볼륨을 조절하는 앱입니다.
 
-<img src="docs/screenshot.png" alt="AppMixer 메뉴바 패널: 마스터 볼륨, Google Chrome과 Safari의 앱별 볼륨 슬라이더" width="400">
+<img src="docs/screenshot.png" alt="AppMixer 메뉴바 패널: Main 볼륨, Google Chrome과 Safari의 앱별 볼륨 슬라이더" width="400">
 
 macOS에는 Windows의 볼륨 믹서 같은 기능이 없어서 시스템 전체 볼륨만 바꿀 수 있습니다. AppMixer는 메뉴바 패널에 지금 소리를 내는 앱 목록을 보여 주고, 앱마다 볼륨을 따로 조절하거나 음소거할 수 있게 해 줍니다.
 

@@ -103,7 +103,9 @@ final class CoreAudioEngine: AudioEngine {
 
         for process in processes {
             if watchedProcesses.insert(process).inserted, let block = processListener {
-                var addr = Self.address(kAudioProcessPropertyIsRunningOutput)
+                // IsRunningOutput은 값만 바뀌고 변경 이벤트가 오지 않아서(macOS 27에서 측정) IsRunning을 구독한다.
+                // shortcut: 마이크와 출력을 같이 쓰던 앱이 출력만 멈추면 이벤트가 없어 다음 갱신 때 반영됨, 문제가 되면 주기적 확인 추가
+                var addr = Self.address(kAudioProcessPropertyIsRunning)
                 AudioObjectAddPropertyListenerBlock(process, &addr, .main, block)
             }
             guard let pid = Self.get(process, kAudioProcessPropertyPID, as: pid_t.self) else { continue }
@@ -164,7 +166,9 @@ final class CoreAudioEngine: AudioEngine {
                 tap.gain.pointee = gain
             } else if let processes = processesByOwner[owner], !processes.isEmpty,
                       let uid = Self.get(device, kAudioDevicePropertyDeviceUID, as: Unmanaged<CFString>.self)?.takeRetainedValue() {
-                taps[owner] = AppTap(processes: processes, outputUID: uid as String, gain: gain)
+                taps[owner] = AppTap(processes: processes, outputUID: uid as String, gain: gain) { [weak self] in
+                    self?.taps[owner] = nil // 시작 실패: 앱이 음소거된 채 남지 않게 정리. 다음 갱신 때 다시 시도한다
+                }
                 log.info("tap 생성 \(self.taps[owner] == nil ? "실패" : "성공"): pid \(owner)")
             }
         }
@@ -237,9 +241,13 @@ private final class AppTap {
     let gain = UnsafeMutablePointer<Float>.allocate(capacity: 1)
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
-    private var procID: AudioDeviceIOProcID?
+    /// deviceQueue 안에서만 읽고 쓴다
+    private final class ProcBox: @unchecked Sendable { var id: AudioDeviceIOProcID? }
+    private let proc = ProcBox()
+    /// IO 콜백 생성·시작·정지는 출력 장치(블루투스 등)가 깨어날 때까지 몇 초씩 걸려서 메인 스레드 밖에서, 순서대로 실행한다.
+    private static let deviceQueue = DispatchQueue(label: "com.dgim9390.AppMixer.device")
 
-    init?(processes: [AudioObjectID], outputUID: String, gain initial: Float) {
+    init?(processes: [AudioObjectID], outputUID: String, gain initial: Float, onStartFailed: @escaping @MainActor @Sendable () -> Void) {
         self.processes = Set(processes)
         gain.initialize(to: initial)
 
@@ -280,21 +288,32 @@ private final class AppTap {
         AudioObjectGetPropertyData(aggregateID, &addr, 0, nil, &size, &deviceRate)
         log.notice("tap \(format.mSampleRate, privacy: .public)Hz \(format.mChannelsPerFrame, privacy: .public)ch → 출력 \(deviceRate, privacy: .public)Hz")
 
-        // 큐 nil = HAL의 실시간 오디오 스레드에서 바로 호출
-        status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, nil, Self.ioBlock(gain: gain))
-        guard status == noErr else { log.error("AudioDeviceCreateIOProcIDWithBlock 실패: \(status)"); return nil }
-        status = AudioDeviceStart(aggregateID, procID)
-        guard status == noErr else { log.error("AudioDeviceStart 실패: \(status)"); return nil }
+        let aggregate = aggregateID
+        let proc = proc
+        nonisolated(unsafe) let block = Self.ioBlock(gain: gain)
+        Self.deviceQueue.async {
+            // 큐 nil = HAL의 실시간 오디오 스레드에서 바로 호출
+            var status = AudioDeviceCreateIOProcIDWithBlock(&proc.id, aggregate, nil, block)
+            if status == noErr { status = AudioDeviceStart(aggregate, proc.id) }
+            guard status != noErr else { return }
+            log.error("IO 시작 실패: \(status)")
+            Task { @MainActor in onStartFailed() }
+        }
     }
 
     deinit {
-        if let procID {
-            AudioDeviceStop(aggregateID, procID)
-            AudioDeviceDestroyIOProcID(aggregateID, procID)
+        let (tap, aggregate) = (tapID, aggregateID)
+        let proc = proc
+        nonisolated(unsafe) let gain = gain
+        Self.deviceQueue.async {
+            if let id = proc.id {
+                AudioDeviceStop(aggregate, id)
+                AudioDeviceDestroyIOProcID(aggregate, id)
+            }
+            if aggregate != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregate) }
+            if tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
+            gain.deallocate() // IO 콜백이 쓰는 메모리라 정지가 끝난 뒤에 해제
         }
-        if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
-        if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
-        gain.deallocate()
     }
 
     /// 실시간 스레드에서 돈다: 할당·락·로그 금지. 입력(탭) 샘플 × gain → 출력.

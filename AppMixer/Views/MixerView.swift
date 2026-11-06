@@ -10,8 +10,8 @@ struct MixerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VolumeRow(
-                title: "마스터",
-                icon: Image(systemName: "hifispeaker.fill"),
+                title: "Main",
+                icon: Image(systemName: "speaker.wave.3.fill"),
                 volume: viewModel.masterVolume,
                 isMuted: viewModel.isMasterMuted,
                 onVolumeChange: viewModel.setMasterVolume,
