@@ -54,7 +54,7 @@
 1. **설치가 쉬움**: 드라이버도 관리자 암호도 없이 앱만 실행하면 됩니다. 메뉴바 유틸리티에는 이 점이 가장 중요합니다.
 2. **라이선스 문제가 없음**: GPL 코드에 의존하지 않으므로 배포 방식을 자유롭게 정할 수 있습니다.
 3. **Swift만으로 충분함**: 브릿징 헤더도 Obj-C/C++ 스텁도 필요 없습니다(3단계에서 따로 만들지 않습니다. 이유는 §6 참고).
-4. **14.2 제약은 문제가 안 됨**: 개발 환경이 macOS 27이고, 메뉴바 UI(`MenuBarExtra`, `@Observable`)도 어차피 macOS 13~14 이상이 필요합니다.
+4. **14.2 제약은 문제가 안 됨**: 개발 환경이 macOS 27이고, 메뉴바 UI에 쓰는 `@Observable`도 어차피 macOS 13~14 이상이 필요합니다.
 
 남는 위험(4단계에서 확인할 것):
 - 실시간 오디오 스레드에서 실행되는 IO 콜백은 메모리 할당이나 락을 쓰면 안 됩니다. Swift 클로저 안에서는 ARC(참조 카운팅)와 할당이 몰래 일어나지 않도록 `UnsafeMutablePointer`만 다루는 짧은 루프로 작성해야 합니다. Swift로 해결이 안 될 정도로 끊김이 생기면 **그때만** 콜백 하나를 C로 옮기는 것을 검토합니다.
@@ -151,7 +151,8 @@ AppMixer/
 ├── README.md                 이 문서 + 빌드 방법
 ├── project.yml               XcodeGen 설정. .xcodeproj는 여기서 생성 (git에 넣지 않음)
 ├── AppMixer/
-│   ├── AppMixerApp.swift     @main 진입점. MenuBarExtra 선언, 엔진 주입 (교체 지점 한 줄)
+│   ├── AppMixerApp.swift     @main 진입점. 메뉴바 아이콘·패널(NSStatusItem + NSPopover), 엔진 주입 (교체 지점 한 줄)
+│   ├── PanelHotKey.swift     패널을 여는 전역 단축키 ⌃⌥X
 │   ├── Views/
 │   │   ├── MixerView.swift   패널 전체: 마스터 행 + 구분선 + 앱 행 리스트
 │   │   └── VolumeRow.swift   아이콘·이름·슬라이더·음소거 버튼 한 줄 (마스터/앱 공용)
@@ -171,10 +172,11 @@ AppMixer/
 
 ---
 
-## 5. UI 방식: `MenuBarExtra(.window)`
+## 5. UI 방식: `NSStatusItem + NSPopover`
 
-- `MenuBarExtra`는 SwiftUI로 메뉴바 아이콘을 만드는 Scene입니다(macOS 13+). 기본 `.menu` 스타일은 일반 메뉴라 슬라이더가 제대로 동작하지 않지만, **`.menuBarExtraStyle(.window)`**를 쓰면 팝오버 같은 패널 안에 임의의 SwiftUI 뷰를 넣을 수 있습니다. 슬라이더와 버튼에는 이것으로 충분하므로 **이 방식을 채택합니다.**
-- 대안인 `NSStatusItem + NSPopover`(AppKit)는 패널 크기·위치를 세밀하게 조절하거나 우클릭 메뉴를 따로 두고 싶을 때만 필요합니다. 지금은 쓰지 않고, 부족한 점이 생기면 그때 바꿉니다(뷰는 그대로 재사용 가능).
+- 처음에는 SwiftUI의 `MenuBarExtra(.window)`로 만들었습니다. 패널 안에 슬라이더와 버튼을 넣기에는 충분했습니다.
+- 전역 단축키를 추가하면서 AppKit의 `NSStatusItem + NSPopover`로 바꿨습니다. `MenuBarExtra`에는 코드로 패널을 여는 API가 없기 때문입니다. 메뉴바 버튼의 `performClick`은 패널을 열지 못했고, 버튼 창에 마우스 이벤트를 직접 보내면 메인 스레드가 멈췄습니다.
+- 패널 내용인 SwiftUI 뷰(`MixerView`)는 그대로 재사용합니다.
 - **Dock 아이콘 숨기기**: Info.plist에 `LSUIElement = YES`를 넣으면 Dock과 앱 전환기(⌘Tab)에 나타나지 않는 "에이전트 앱"이 됩니다.
 
 ---

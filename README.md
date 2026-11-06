@@ -20,12 +20,13 @@ macOS에는 Windows의 볼륨 믹서 같은 기능이 없어서 시스템 전체
 - 시스템 마스터 볼륨 조절. 키보드 볼륨 키와 연동됩니다.
 - 앱별 설정 저장. 앱이나 AppMixer를 다시 실행해도 유지됩니다.
 - 출력 장치가 바뀌면(이어폰 연결 등) 자동으로 따라감
+- 어디서든 단축키로 패널 열기
 - 로그인 시 자동 실행
 - Dock 아이콘 없이 메뉴바에서만 동작
 
 ## 사용법
 
-메뉴바 아이콘을 클릭하면 패널이 열립니다. 맨 위 **Main**은 시스템 전체 볼륨이고, 그 아래에 소리를 내는 앱이 표시됩니다.
+메뉴바 아이콘을 클릭하거나 <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>X</kbd>를 누르면 패널이 열립니다. 맨 위 **Main**은 시스템 전체 볼륨이고, 그 아래에 소리를 내는 앱이 표시됩니다.
 
 <img src="docs/screenshot.png" alt="AppMixer 메뉴바 패널: Main 볼륨, Google Chrome과 Safari의 앱별 볼륨 슬라이더" width="400">
 
@@ -38,10 +39,11 @@ macOS에는 Windows의 볼륨 믹서 같은 기능이 없어서 시스템 전체
 
 ### 키보드 조작
 
-패널이 열려 있을 때 사용할 수 있습니다.
+<kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>X</kbd>는 어디서든 동작하고, 나머지 키는 패널이 열려 있을 때 사용할 수 있습니다.
 
 | 키 | 동작 |
 |---|---|
+| <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>X</kbd> | 패널 열기/닫기 |
 | <kbd>↑</kbd> <kbd>↓</kbd> | 조절할 행 선택 |
 | <kbd>←</kbd> <kbd>→</kbd> | 볼륨 1%씩 조절 |
 | <kbd>⌘</kbd> + <kbd>←</kbd> <kbd>→</kbd> | 볼륨 5%씩 조절 |
@@ -152,12 +154,13 @@ The app's interface is in Korean, except for the Main label.
 - System master volume control, kept in sync with the keyboard volume keys
 - Per-app settings are saved and persist when an app or AppMixer restarts
 - Automatically follows the output device when it changes (for example, when you connect earphones)
+- Open the panel from anywhere with a keyboard shortcut
 - Launch at login
 - Runs only in the menu bar, with no Dock icon
 
 ## Usage
 
-Click the menu bar icon to open the panel. **Main** at the top is the system-wide volume, and the apps playing sound are listed below it.
+Click the menu bar icon or press <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>X</kbd> to open the panel. **Main** at the top is the system-wide volume, and the apps playing sound are listed below it.
 
 <img src="docs/screenshot.png" alt="AppMixer menu bar panel: Main volume and per-app volume sliders for Google Chrome and Safari" width="400">
 
@@ -170,10 +173,11 @@ This is the real panel rendered with demo data.
 
 ### Keyboard controls
 
-These are available while the panel is open.
+<kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>X</kbd> works from anywhere. The other keys are available while the panel is open.
 
 | Key | Action |
 |---|---|
+| <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>X</kbd> | Open or close the panel |
 | <kbd>↑</kbd> <kbd>↓</kbd> | Select the row to adjust |
 | <kbd>←</kbd> <kbd>→</kbd> | Adjust volume by 1% |
 | <kbd>⌘</kbd> + <kbd>←</kbd> <kbd>→</kbd> | Adjust volume by 5% |
