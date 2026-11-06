@@ -1,5 +1,7 @@
 # AppMixer
 
+한국어 | [English](README.en.md)
+
 macOS 메뉴바에서 앱별로 볼륨을 조절하는 앱입니다.
 
 <img src="docs/screenshot.png" alt="AppMixer 메뉴바 패널: Main 볼륨, Google Chrome과 Safari의 앱별 볼륨 슬라이더" width="400">
@@ -19,6 +21,10 @@ macOS에는 Windows의 볼륨 믹서 같은 기능이 없어서 시스템 전체
 ## 사용법
 
 메뉴바 아이콘을 클릭하면 패널이 열립니다. 맨 위 **Main**은 시스템 전체 볼륨이고, 그 아래에 소리를 내는 앱이 표시됩니다.
+
+<img src="docs/demo.gif" alt="패널에서 키보드와 슬라이더로 앱별 볼륨을 조절하고 음소거하는 데모" width="360">
+
+데모 데이터로 렌더링한 실제 패널 화면입니다.
 
 - **볼륨 조절:** 슬라이더를 움직입니다. 눈금은 25% 간격입니다.
 - **음소거:** 행 오른쪽의 스피커 버튼을 누릅니다. 다시 누르면 이전 볼륨으로 돌아갑니다.
@@ -98,7 +104,7 @@ cp -R build/Build/Products/Release/AppMixer.app /Applications/
 
 ## 개발
 
-Swift와 SwiftUI로 작성했으며 외부 의존성은 없습니다. 오디오 엔진은 `AudioEngine` 프로토콜 뒤에 분리되어 있어서, UI 코드는 Core Audio에 의존하지 않습니다. 설계와 구현 기록은 [docs/DESIGN.md](docs/DESIGN.md)에 있습니다.
+Swift와 SwiftUI로 작성했으며 외부 의존성은 없습니다. 오디오 엔진은 `AudioEngine` 프로토콜 뒤에 분리되어 있어서, UI 코드는 Core Audio에 의존하지 않습니다. 설계와 구현 기록은 [docs/DESIGN.md](docs/DESIGN.md)에 있고, 앱 감지 지연을 측정하고 고친 과정은 [docs/detection-latency.md](docs/detection-latency.md)에 있습니다.
 
 ```bash
 xcodegen generate
@@ -115,6 +121,7 @@ xcodebuild -project AppMixer.xcodeproj -scheme AppMixer -derivedDataPath build t
 
 - DMG 창의 배경, 아이콘 위치: `dmg/make-background.swift`, `dmg/settings.py`
 - 앱 아이콘: `swift scripts/make-icon.swift`로 다시 생성합니다.
+- 데모 GIF: 빌드와 실행 방법은 `scripts/make-demo.swift` 맨 위에 있습니다.
 
 ## 라이선스
 
