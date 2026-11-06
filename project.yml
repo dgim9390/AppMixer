@@ -16,8 +16,8 @@ targets:
       path: AppMixer/Info.plist
       properties:
         CFBundleDisplayName: AppMixer
-        CFBundleShortVersionString: "1.0.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "1.0.2"
+        CFBundleVersion: "3"
         LSUIElement: true
         NSAudioCaptureUsageDescription: 앱별 볼륨을 조절하려면 각 앱의 오디오를 가져와야 합니다.
     entitlements:
